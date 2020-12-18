@@ -1,7 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
 
-# https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/command-options-general.html
-
 Parameters:
 
   EnvironmentName:
@@ -41,15 +39,15 @@ Resources:
   backendApplication:
     Type: AWS::ElasticBeanstalk::Application
     Properties:
-      ApplicationName: manualAppTest
-      Description: Backend Java Application
+      ApplicationName: !Ref EnvironmentName
+      Description: Java App
 
   sampleEnvironment:
     Type: AWS::ElasticBeanstalk::Environment
     Properties:
       ApplicationName: !Ref backendApplication
       TemplateName: !Ref beanstalkTemplate
-      EnvironmentName: manualBackendApp
+      EnvironmentName: !Ref EnvironmentName
 
   beanstalkTemplate:
     Type: AWS::ElasticBeanstalk::ConfigurationTemplate
@@ -58,17 +56,70 @@ Resources:
       Description: AWS ElasticBeanstalk Sample Configuration Template
       SolutionStackName: "64bit Amazon Linux 2 v3.1.3 running Corretto 11"
       OptionSettings:
+        # For available options, see here: 
+        # https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/command-options-general.html
+        #-----------------------------------------------------------------
+        - Namespace: aws:autoscaling:asg
+          OptionName: MinSize
+          Value: 1
+
+        - Namespace: aws:autoscaling:asg
+          OptionName: MaxSize
+          Value: 5
+        #-----------------------------------------------------------------
+        - Namespace: aws:autoscaling:launchconfiguration
+          OptionName: IamInstanceProfile
+          Value: !Ref BeanstalkEc2InstanceProfile
+        #-----------------------------------------------------------------
+        - Namespace: aws:ec2:instances
+          OptionName: EnableSpot
+          Value: true
+
+        - Namespace: aws:ec2:instances
+          OptionName: SpotFleetOnDemandBase
+          Value: 1
+
+        - Namespace: aws:ec2:instances
+          OptionName: SpotFleetOnDemandAboveBasePercentage
+          Value: 70
+        #-----------------------------------------------------------------
         - Namespace: aws:ec2:vpc
           OptionName: VPCId
           Value: !Ref VPC
         
+          # These are the subnets of the auto-scaling EC2s and should be private:
         - Namespace: aws:ec2:vpc
-          OptionName: Subnets
+          OptionName: Subnets             
           Value: !Sub "${PrivateSubnet1},${PrivateSubnet2}"
 
+        - Namespace: aws:ec2:vpc
+          OptionName: ELBScheme
+          Value: public
+
+        - Namespace: aws:ec2:vpc
+          OptionName: ELBSubnets
+          Value: !Sub "${PublicSubnet1},${PublicSubnet2}"
+
+        - Namespace: aws:ec2:vpc
+          OptionName: AssociatePublicIpAddress
+          Value: false
+        #-----------------------------------------------------------------
+        - Namespace: aws:elasticbeanstalk:environment
+          OptionName: LoadBalancerType
+          Value: application
+        
         - Namespace: aws:elasticbeanstalk:environment
           OptionName: ServiceRole
           Value: !Sub BeanstalkServiceRole
+
+        
+  BeanstalkEc2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties: 
+      InstanceProfileName: !Sub "${EnvironmentName}-beanstalk-ec2-profile"
+      Roles: 
+        - !Ref BeanstalkEc2AutoscalingRole
+
 
   BeanstalkEc2AutoscalingRole:
     Type: 'AWS::IAM::Role'
@@ -84,7 +135,6 @@ Resources:
               - 'sts:AssumeRole'
       Path: /
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AdministratorAccess
         - arn:aws:iam::aws:policy/AWSElasticBeanstalkWebTier
         - arn:aws:iam::aws:policy/AWSElasticBeanstalkMulticontainerDocker
         - arn:aws:iam::aws:policy/AWSElasticBeanstalkWorkerTier
@@ -100,12 +150,13 @@ Resources:
             Principal:
               Service:
               - elasticbeanstalk.amazonaws.com
-              - cloudformation.amazonaws.com
             Action:
               - 'sts:AssumeRole'
+            Condition:
+              StringEquals:
+                "sts:ExternalId": elasticbeanstalk
       Path: /
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AdministratorAccess
         - arn:aws:iam::aws:policy/service-role/AWSElasticBeanstalkEnhancedHealth
         - arn:aws:iam::aws:policy/service-role/AWSElasticBeanstalkService
       Policies:
